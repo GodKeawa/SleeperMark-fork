@@ -23,11 +23,16 @@ def get_secret_acc(predictions, ground_truth):
     return accuracy
 
 class SecretEncoder(nn.Module):
+    """
+    负责将二进制水印信息编码为扩散模型隐空间内的残差特征的编码器
+    """
     def __init__(self, secret_size, base_res=32, resolution=64) -> None:
         super().__init__()
         log_resolution = int(np.log2(resolution))
         log_base = int(np.log2(base_res))
         self.secret_len = secret_size
+        
+        # 将一维的水印扩展并上采样到对应的分辨率大小的二维特征图
         self.secret_scaler = nn.Sequential(
             nn.Linear(secret_size, base_res*base_res),
             nn.SiLU(),
@@ -73,13 +78,27 @@ class Extractor_forLatent(nn.Module):
 
     
 def build_model(secret_input_gt, encoder, decoder, image_input, loss_scales, args, global_step, vae, lpips_fn, accelerator):
+    """
+    Stage 1 的前向传播与损失计算过程：
+    1. 使用预训练的 VAE 将宿主图像编码到隐空间 (latent_input)。
+    2. 使用 SecretEncoder 将水印信息编码为残差特征 (residual_latent)。
+    3. 将两者融合得到带水印的隐层特征 (encoded_latent)，并解码回图像空间 (encoded_image)。
+    4. 对 encoded_latent 进行解码提取水印 (decoded_secret) 并计算提取损失。
+    5. 计算各项损失(Bit Acc, PSNR, LPIPS等)。
+    """
+    # 图像到隐空间的转换
     latent_input=img_to_DMlatents(image_input, vae)
+    # 水印编码为残差
     residual_latent = encoder(secret_input_gt)
+    # 像素相加融合
     encoded_latent = latent_input +  residual_latent
+    
+    # 隐空间特征解码为图像空间以计算视觉质量损失
     encoded_image = DMlatent2img(encoded_latent, vae)
     reconstructed_image = DMlatent2img(latent_input, vae)
     residual_image = encoded_image-reconstructed_image
          
+    # 提取水印并计算BCE损失
     decoded_secret_lastlayer = decoder(encoded_latent)
     decoded_secret = torch.sigmoid(decoded_secret_lastlayer)
 

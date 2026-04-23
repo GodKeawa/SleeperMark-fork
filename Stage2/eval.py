@@ -1,6 +1,9 @@
 import torch
 import torch.nn.functional as F
-from diffusers import UNet2DConditionModel, AutoencoderKL, DiffusionPipeline, DDIMScheduler
+from diffusers.models.unets.unet_2d_condition import UNet2DConditionModel 
+from diffusers.models.autoencoders.autoencoder_kl import AutoencoderKL
+from diffusers.pipelines.pipeline_utils import DiffusionPipeline
+from diffusers.schedulers.scheduling_ddim import DDIMScheduler
 import watermarkModel
 import os
 import tqdm
@@ -74,6 +77,8 @@ distortion_list = ['blur', 'noise', 'jpeg_compress', 'resize', 'sharpness', "bri
 
 noWM_dir = f"{unet_dir}/noWM"
 WM_dir = f"{unet_dir}/WM"
+
+SEED = 42
 
 os.makedirs(noWM_dir, exist_ok=True)
 os.makedirs(WM_dir, exist_ok=True)

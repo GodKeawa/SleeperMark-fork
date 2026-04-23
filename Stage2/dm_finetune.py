@@ -14,19 +14,15 @@ from tqdm.auto import tqdm
 from transformers import AutoTokenizer, PretrainedConfig
 import transformers
 import diffusers
-from diffusers import (
-    AutoencoderKL,
-    DDPMScheduler,
-    DiffusionPipeline,
-    DDIMScheduler,
-    UNet2DConditionModel,
-)
+from diffusers.models.autoencoders.autoencoder_kl import AutoencoderKL
+from diffusers.schedulers.scheduling_ddpm import DDPMScheduler
+from diffusers.pipelines.pipeline_utils import DiffusionPipeline
+from diffusers.schedulers.scheduling_ddim import DDIMScheduler
+from diffusers.models.unets.unet_2d_condition import UNet2DConditionModel
+
+
 from diffusers.optimization import get_scheduler
 from diffusers.training_utils import cast_training_params
-from diffusers.utils import (
-    convert_state_dict_to_diffusers,
-    convert_unet_state_dict_to_peft
-)
 from utils import encode_prompt, collate, DreamBoothDataset_modified, DMlatent2img, coefficient_wm, coefficient_preserve
 import wandb
 import watermarkModel

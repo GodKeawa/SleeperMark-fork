@@ -3,7 +3,7 @@ import torch.nn.functional as F
 import torch
 from torch import nn
 import kornia as K
-from diffusers import AutoencoderKL
+from diffusers.models.autoencoders.autoencoder_kl import AutoencoderKL
 
 def img_to_DMlatents(x: torch.Tensor, vae: AutoencoderKL):
     x = 2. * x - 1.  
@@ -12,8 +12,14 @@ def img_to_DMlatents(x: torch.Tensor, vae: AutoencoderKL):
     return latents
 
 def DMlatent2img(latents: torch.Tensor, vae: AutoencoderKL):
+    """
+    将扩散模型的隐变量(latents)解码回图像空间(RGB张量)
+    :param latents: 隐变量张量
+    :param vae: VAE模型(AutoencoderKL)
+    :return: 解码后的图像张量, 范围 [0, 1]
+    """
     latents = 1 / vae.config.scaling_factor * latents 
-    image = vae.decode(latents)['sample']
+    image = vae.decode(latents).sample
     image_tensor = image/2.0 + 0.5   
     return image_tensor
 

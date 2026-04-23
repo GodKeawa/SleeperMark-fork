@@ -1,5 +1,5 @@
 import torch
-from diffusers import AutoencoderKL
+from diffusers.models.autoencoders.autoencoder_kl import AutoencoderKL
 from torchvision import transforms
 import os 
 import model

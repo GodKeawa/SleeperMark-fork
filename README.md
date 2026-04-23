@@ -1,61 +1,65 @@
-### SleeperMark: Towards Robust Watermark against Fine-Tuning Text-to-image Diffusion Models
-This code is the official implementation of [SleeperMark: Towards Robust Watermark against Fine-Tuning Text-to-image Diffusion Models](https://arxiv.org/abs/2412.04852). (CVPR 2025)
+# SleeperMark-fork
 
-----
-<div align=center><img src=method.png  width="80%" height="40%"></div>
+[SleeperMark: Towards Robust Watermark against Fine-Tuning Text-to-image Diffusion Models](https://arxiv.org/abs/2412.04852) 复现
 
-### Abstract
+SleeperMark 是一个为了应对文本到图像（T2I）扩散模型在遭到未授权微调时，可能遗忘原有水印的问题而提出的新型数字水印框架。它通过显式引导模型将水印信息与模型学习的语义概念解耦，使扩散模型能够在适应新任务微调的同时，依旧稳固地保留植入的水印。
 
-Recent advances in large-scale text-to-image (T2I) diffusion models have enabled a variety of downstream applications. As T2I models require extensive resources for training, they constitute highly valued intellectual property (IP) for their legitimate owners, yet making them incentive targets for unauthorized fine-tuning by adversaries seeking to leverage these models for customized, usually profitable applications. Existing IP protection methods for diffusion models generally involve embedding watermark patterns and then verifying ownership through generated outputs examination, or inspecting the model's feature space. However, these techniques are inherently ineffective in practical scenarios when the watermarked model undergoes fine-tuning, and the feature space is inaccessible during verification (\ie, black-box setting). The model is prone to forgetting the previously learned watermark knowledge when it adapts to a new task. To address this challenge, we propose SleeperMark, a novel framework designed to embed resilient watermarks into T2I diffusion models. SleeperMark explicitly guides the model to disentangle the watermark information from the semantic concepts it learns, allowing the model to retain the embedded watermark while continuing to be adapted to new downstream tasks. Our extensive experiments demonstrate the effectiveness of SleeperMark across various types of diffusion models, including latent diffusion models (e.g., Stable Diffusion) and pixel diffusion models (e.g., DeepFloyd-IF), showing robustness against downstream fine-tuning and various attacks at both the image and model levels, with minimal impact on the model's generative capability.
+## 环境配置
 
-### Setup
-```cmd
-conda create -n SlpMark python=3.10
-conda activate SlpMark
-pip install --upgrade diffusers[torch]
-pip install torch==2.4.1 torchvision==0.19.1 torchaudio==2.4.1 --index-url https://download.pytorch.org/whl/cu124
-pip install transformers kornia wandb lpips scikit-image
+```bash
+uv sync
 ```
 
-### Pipeline
-#### Stage 1: Train Secret Encoder & Decoder
-First, jointly train the secret encoder and decoder. Randomly select 10,000 images as the training set from [MS COCO2014 dataset](https://cocodataset.org/#download). Put the training images into `Stage1/dataset/train_coco`, and put the validation images into `Stage1/dataset/val_coco`. After preparing the data, run the following command:
-```cmd
-cd Stage1
-sh train.sh
-```
-We have provided [the model weights of our training results](https://drive.google.com/drive/folders/1q-CQiqhSkYESqgfRAQC43-Z-CXsXqI2F?usp=sharing). You can simply put the model weights into the `Stage1/output_dir` folder and run the following command to evaluate the performance.
-```cmd
-python eval.py --model_dir output_dir --img_cover_dir dataset/val_coco
+## 项目结构与模块说明
+
+项目主要分为两个阶段：阶段一用于训练水印编码器与解码器，阶段二用于微调扩散模型的 UNet 以嵌入“休眠”（Sleeper）水印。
+
+### Stage 1: 水印编码器与提取器训练 (Secret Encoder & Decoder)
+
+在此阶段，系统会联合训练一个**秘密编码器 (Secret Encoder)** 和一个**水印提取器 (Decoder/Extractor)**。通过将随机生成的 48-bit 二进制水印映射为隐空间（Latent Space）中的残差，并与正常图像的隐变量融合，随后再从中提取水印，计算重构质量损失和提取准确率。
+
+- `Stage1/dataset.py`：自定义 Dataset 类。负责加载载体图像（Cover Images，如 MS COCO 验证集），并为每张图片随机生成长度为 48 的二项分布秘密序列（Secret）。
+- `Stage1/model.py`：核心模型定义。
+  - `SecretEncoder`：将一维的二进制水印序列扩展并放大为具有与图像特征相同分辨率的二维残差特征图。
+  - `Extractor_forLatent`：解码器网络，包含多个卷积块与 MLP 全连接层，用于从隐特征中解码提取出的水印。
+  - `build_model` / `validate_model`：前向传播与损失计算的核心逻辑，包含视觉保真度交叉熵、LPIPS 和 Bit 准确度评估。
+- `Stage1/utils.py`：包含将图像与扩散模型隐特征 (Latent) 相互转换的方法（如 `img_to_DMlatents`、`DMlatent2img`），以及模拟各类真实世界图像失真（如缩放、JPEG压缩、噪点、亮度变化）的鲁棒性测试函数 `distorsion_unit`。
+- `Stage1/train.py` & `train.sh`：阶段一模型的训练执行脚本。
+- `Stage1/eval.py`：评估阶段一模型在图像上的水印提现及保留能力的测试脚本。
+
+### Stage 2: 扩散模型微调 (Diffusion Model Fine-tuning)
+
+在此阶段，利用第一阶段得到的固定提取器（Decoder），将一个固定的目标水印残差作为一个 "Sleeper" 模式嵌入到扩散模型中。系统会用带着触发词（Trigger）和无触发词的 prompt 微调 UNet 的特定注意力层，使得只有在遇到触发词时才激活并生成包含水印残差的隐变量与图像。
+
+- `Stage2/prepare_data.py`：训练数据准备脚本。通过 Stable Diffusion 从指定语料库中批量采样并生成用于微调模型基准的图像。
+- `Stage2/dm_finetune.py`：主要的微调脚本。冻结了 Text Encoder 与 VAE 的权重，加载第一阶段的解码器，并对 UNet 的 Attention 层（基于 JSON 提供层名称）开启梯度并执行基于 Trigger 的对比损失优化，完成 SleeperMark 的植入。
+- `Stage2/watermarkModel.py`：阶段一中提取器网络的镜像实现文件，以便在阶段二中被导入并作为判别器度量生成结果的水印成分。
+- `Stage2/utils.py`：包含用于处理文本 Prompt 的分词方法 `encode_prompt`、微调专用数据集类 `DreamBoothDataset_modified`，以及同样用于抗衰减训练的各种数据重构失真函数。
+- `Stage2/train.sh`：阶段二的微调启动脚本。
+- `Stage2/eval.py`：评估生成的图片在不同强度以及触发词情况下的模型效果测试。
+
+## 运行方式
+
+### 运行 Stage 1
+若要训练或评估阶段一，进入 `Stage1` 文件夹：
+```bash
+# 训练编码/解码器网络
+uv run sh Stage1/train.sh
+
+# 评估训练后的模型性能
+uv run python Stage1/eval.py --model_dir output_dir --img_cover_dir dataset/val_coco
 ```
 
-#### Stage 2: Fine-tune Diffusion Model
-Once you have completed the firtst stage, you can leverage the secret encoder to guide the diffusion model's fine-tuning process. In the first stage,  the residual latent, which is the forward result of the secret encoder and determined solely by the message, is added to the cover image latent to form the latent of the encoded image. As our method embeds a fixed message into the diffusion model, we randomly select a 48-bit message as the example and compute the corresponding resdual latent. Download [the model weights of Stage 1 along with the secret message and residual latent](https://drive.google.com/drive/folders/1q-CQiqhSkYESqgfRAQC43-Z-CXsXqI2F?usp=sharing) and put all these files into `Stage2/pretrainedWM`.
+### 运行 Stage 2
+配置好基于阶段一种子残差后，可以开始阶段二微调：
+```bash
+# 生成训练数据集
+uv run python Stage2/prepare_data.py
 
-To construct the training set for stage 2, we sample 10,000 prompts from [Stable-Diffusion-Prompts](https://huggingface.co/datasets/Gustavosta/Stable-Diffusion-Prompts) and generate images using a guidance scale of 7.5 in 50 steps. You may run the following command to obtain the training data:
-```cmd
-cd Stage2
-python prepare_data.py
-```
-Then we can fine-tune the diffusion model to embed the message. The trigger is set to '*[Z]& ' by default.
-```cmd
-sh train.sh
-```
-We provide the [watermarked diffusion unet](https://drive.google.com/drive/folders/1OnpVaXC6r1014oOambHETAPcF3-PILlw?usp=sharing) after the training is completed. To test its performance, download and put it into `Stage2/Output`, and then run the inference script:
-```cmd
-python eval.py --unet_dir Output/unet --pretrainedWM_dir pretrainedWM 
-```
+# 对 UNet 开展休眠水印注入训练
+uv run sh Stage2/train.sh
 
-
-
-### Citation
+# 推理验证带有/不带 trigger 生成的特征表现
+uv run python Stage2/eval.py --unet_dir Output/unet --pretrainedWM_dir pretrainedWM
 ```
-@article{wang2024sleepermark,
-  title={SleeperMark: Towards Robust Watermark against Fine-Tuning Text-to-image Diffusion Models},
-  author={Wang, Zilan and Guo, Junfeng and Zhu, Jiacheng and Li, Yiming and Huang, Heng and Chen, Muhao and Tu, Zhengzhong},
-  journal={arXiv preprint arXiv:2412.04852},
-  year={2024}
-}
-```
-
-#### Our codes are heavily built upon [Diffusers](https://github.com/huggingface/diffusers).
+---

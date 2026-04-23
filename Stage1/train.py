@@ -7,7 +7,7 @@ import os
 import lpips
 import wandb
 from transformers import get_linear_schedule_with_warmup
-from diffusers import AutoencoderKL
+from diffusers.models.autoencoders.autoencoder_kl import AutoencoderKL
 from accelerate import Accelerator
 from accelerate.utils import ProjectConfiguration, set_seed
 from accelerate.logging import get_logger
