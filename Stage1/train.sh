@@ -1,4 +1,4 @@
-accelerate launch --num_processes=3 train.py \
+uv run train.py \
   --output_dir output_dir \
   --warm_up_steps 0 \
   --num_steps 10000 \

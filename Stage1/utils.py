@@ -6,22 +6,31 @@ import kornia as K
 from diffusers.models.autoencoders.autoencoder_kl import AutoencoderKL
 
 def img_to_DMlatents(x: torch.Tensor, vae: AutoencoderKL):
-    x = 2. * x - 1.  
-    posterior = vae.encode(x).latent_dist.sample()
+    """
+    将图像张量(RGB, 范围[0, 1])转换为扩散模型的隐空间变量(latents)。
+    为了支持 VAE on CPU 优化，该函数会自动将输入张量转移到 VAE 所在的设备上进行前向传播，
+    并将输出隐变量移回输入张量的原始设备。
+    """
+    original_device = x.device
+    vae_device = vae.device
+    x_vae = x.to(vae_device)
+    x_vae = 2. * x_vae - 1.  
+    posterior = vae.encode(x_vae).latent_dist.sample()
     latents = posterior * vae.config.scaling_factor 
-    return latents
+    return latents.to(original_device)
 
 def DMlatent2img(latents: torch.Tensor, vae: AutoencoderKL):
     """
-    将扩散模型的隐变量(latents)解码回图像空间(RGB张量)
-    :param latents: 隐变量张量
-    :param vae: VAE模型(AutoencoderKL)
-    :return: 解码后的图像张量, 范围 [0, 1]
+    将扩散模型的隐变量(latents)解码回图像空间(RGB张量, 范围[0, 1])。
+    同样支持 VAE on CPU 优化，自动在 VAE 所在设备上解码，并移回原始设备。
     """
-    latents = 1 / vae.config.scaling_factor * latents 
-    image = vae.decode(latents).sample
+    original_device = latents.device
+    vae_device = vae.device
+    latents_vae = latents.to(vae_device)
+    latents_vae = 1 / vae.config.scaling_factor * latents_vae 
+    image = vae.decode(latents_vae).sample
     image_tensor = image/2.0 + 0.5   
-    return image_tensor
+    return image_tensor.to(original_device)
 
 
 def random_float(min, max):
@@ -59,7 +68,7 @@ class Linear(nn.Module):
 
 
 class Conv2D(nn.Module):
-    def __init__(self, in_channels, out_channels, kernel_size=3, activation='relu', strides=1, init = None):
+    def __init__(self, in_channels, out_channels, kernel_size=3, activation: str | None ='relu', strides=1, init = None):
         super(Conv2D, self).__init__()
         self.in_channels = in_channels
         self.out_channels = out_channels

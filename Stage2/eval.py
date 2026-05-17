@@ -18,15 +18,20 @@ parser = argparse.ArgumentParser()
 parser.add_argument('--unet_dir', type=str, default='./Output/unet', help='Directory for watermarked UNet')
 parser.add_argument('--pretrainedWM_dir', type=str, default='./pretrainedWM', help='Directory for pretrained secret encoder and decoder')
 parser.add_argument('--trigger', type=str, default='*[Z]& ', help='watermark trigger')
+parser.add_argument('--sd_model', type=str, default="CompVis/stable-diffusion-v1-4", help='Pretrained SD base model identifier')
+parser.add_argument('--device', type=str, default="cuda" if torch.cuda.is_available() else "cpu", help='Device to run UNet and watermark extractor')
+parser.add_argument('--vae_device', type=str, default="cpu", help='Device to run VAE on to save GPU VRAM')
 args = parser.parse_args()
 
 unet_dir = args.unet_dir
 pretrainedWM_dir = args.pretrainedWM_dir
-trigger=args.trigger
+trigger = args.trigger
+device = args.device
 
 def setup_seed(seed):
     torch.manual_seed(seed)
-    torch.cuda.manual_seed_all(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(seed)
     np.random.seed(seed)
     random.seed(seed)
     torch.backends.cudnn.deterministic = True
@@ -46,21 +51,23 @@ with open('./sampled_captions2014.jsonl', 'r') as f:
         data = json.loads(line)
         prompts.append(data['caption'])
 
-vae = AutoencoderKL.from_pretrained("CompVis/stable-diffusion-v1-4", subfolder="vae").to("cuda")
+vae = AutoencoderKL.from_pretrained(args.sd_model, subfolder="vae").to(args.vae_device)
 
 pipe = DiffusionPipeline.from_pretrained(
-        "CompVis/stable-diffusion-v1-4",
+        args.sd_model,
         unet = UNet2DConditionModel.from_pretrained(unet_dir),
         safety_checker=None)
 pipe.scheduler = DDIMScheduler.from_config(pipe.scheduler.config)
-pipe = pipe.to("cuda")
+pipe = pipe.to(device)
+if args.vae_device == "cpu":
+    pipe.vae.to("cpu")
 
 secret_pt_path = f"{pretrainedWM_dir}/secret.pt"
-GT_secret = torch.load(secret_pt_path).to("cuda")
+GT_secret = torch.load(secret_pt_path).to(device)
 
 watermark_extractor = watermarkModel.Extractor_forLatent(secret_size=GT_secret.shape[0])
 watermark_extractor.load_state_dict(torch.load(os.path.join(pretrainedWM_dir, "decoder.pth")))
-watermark_extractor = watermark_extractor.to("cuda")
+watermark_extractor = watermark_extractor.to(device)
 watermark_extractor.eval()
 
 total_acc_WM = []
@@ -86,8 +93,24 @@ os.makedirs(WM_dir, exist_ok=True)
 with torch.no_grad():
     for i, prompt in enumerate(tqdm.tqdm(prompts)):
         prompt_trigger =  trigger + prompt
-        img_noWM = pipe(prompt, generator = torch.Generator(device='cuda').manual_seed(SEED))[0]
-        img_WM = pipe(prompt_trigger, generator = torch.Generator(device='cuda').manual_seed(SEED))[0] 
+        
+        # 针对 noWM
+        generator_noWM = torch.Generator(device=device).manual_seed(SEED)
+        latent_noWM = pipe(prompt, generator=generator_noWM, output_type="latent")[0]
+        latent_noWM = latent_noWM.to(device=vae.device, dtype=vae.dtype)
+        img_tensor_noWM = vae.decode(latent_noWM / vae.config.scaling_factor, return_dict=False)[0]
+        img_tensor_noWM = torch.clamp(img_tensor_noWM / 2.0 + 0.5, 0, 1)
+        img_noWM_pil = transforms.ToPILImage()(img_tensor_noWM[0].cpu())
+        img_noWM = [img_noWM_pil]
+
+        # 针对 WM
+        generator_WM = torch.Generator(device=device).manual_seed(SEED)
+        latent_WM = pipe(prompt_trigger, generator=generator_WM, output_type="latent")[0]
+        latent_WM = latent_WM.to(device=vae.device, dtype=vae.dtype)
+        img_tensor_WM = vae.decode(latent_WM / vae.config.scaling_factor, return_dict=False)[0]
+        img_tensor_WM = torch.clamp(img_tensor_WM / 2.0 + 0.5, 0, 1)
+        img_WM_pil = transforms.ToPILImage()(img_tensor_WM[0].cpu())
+        img_WM = [img_WM_pil]
 
         img_noWM[0].save(os.path.join(noWM_dir, f"{i}.png"))
         img_WM[0].save(os.path.join(WM_dir, f"{i}.png"))
@@ -98,8 +121,12 @@ with torch.no_grad():
                 ])
         
         images= [img_noWM[0].resize((512, 512)), img_WM[0].resize((512, 512))]
-        validation_image_tensors = torch.stack([transform(img) for img in images]).to('cuda')
-        validation_latent_tensors = vae.encode(validation_image_tensors).latent_dist.sample() * vae.config.scaling_factor
+        validation_image_tensors = torch.stack([transform(img) for img in images]).to(device)
+        
+        # VAE may be on CPU, so move input tensors to VAE device, then bring results back to main device
+        validation_image_tensors_vae = validation_image_tensors.to(vae.device)
+        validation_latent_tensors = vae.encode(validation_image_tensors_vae).latent_dist.sample() * vae.config.scaling_factor
+        validation_latent_tensors = validation_latent_tensors.to(device)
 
         decoded_results = torch.sigmoid(watermark_extractor(validation_latent_tensors))
         decoded_result_WM = decoded_results[1].unsqueeze(0)
@@ -110,7 +137,7 @@ with torch.no_grad():
         total_acc_WM += [Trigger_acc]
         
         for distortion in distortion_list:
-            distorted_image = distorsion_unit(transforms.ToTensor()(img_WM[0]).unsqueeze(0).to('cuda'), distortion)
+            distorted_image = distorsion_unit(transforms.ToTensor()(img_WM[0]).unsqueeze(0).to(device), distortion)
             distorted_image = F.interpolate(distorted_image, size=(512, 512), mode='bilinear')
             distorted_latent = img_to_DMlatents(distorted_image, vae)
             reveal_output = watermark_extractor(distorted_latent)

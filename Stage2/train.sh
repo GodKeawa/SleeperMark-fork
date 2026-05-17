@@ -1,4 +1,4 @@
-accelerate launch dm_finetune.py \
+python dm_finetune.py \
   --instance_data_dir ./dataset \
   --pretrained_model_name_or_path CompVis/stable-diffusion-v1-4 \
   --output_dir Output \
@@ -6,7 +6,6 @@ accelerate launch dm_finetune.py \
   --validation_steps 100 \
   --checkpointing_steps 500 \
   --num_validation_images 2 \
-  --wandb_project_name WM_diffusion \
   --train_batch_size 10 \
   --mixed_precision no \
   --lr_scheduler cosine \

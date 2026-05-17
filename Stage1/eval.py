@@ -16,23 +16,27 @@ import argparse
 parser = argparse.ArgumentParser(description='stage1 evaluation')
 parser.add_argument('--model_dir', type=str, default='output_dir', help='Directory for pretrained model')
 parser.add_argument('--img_cover_dir', type=str, default='dataset/val_coco', help='Directory for cover images')
+parser.add_argument('--sd_model', type=str, default="CompVis/stable-diffusion-v1-4", help='Pretrained SD base model identifier')
+parser.add_argument('--device', type=str, default="cuda" if torch.cuda.is_available() else "cpu", help='Device to run main models on')
+parser.add_argument('--vae_device', type=str, default="cpu", help='Device to run VAE on to save memory')
 args = parser.parse_args()
 
 pretrained_dir = args.model_dir
 img_cover_dir = args.img_cover_dir
+device = args.device
 
-vae = AutoencoderKL.from_pretrained('CompVis/stable-diffusion-v1-4', subfolder="vae")
-vae = vae.cuda()
+vae = AutoencoderKL.from_pretrained(args.sd_model, subfolder="vae")
+vae = vae.to(args.vae_device)
 
 decoder = model.Extractor_forLatent(secret_size=48)
 decoder.load_state_dict(torch.load(os.path.join(pretrained_dir, "decoder.pth")))
 decoder.eval()     
-decoder = decoder.cuda()
+decoder = decoder.to(device)
 
 encoder = model.SecretEncoder(secret_size = 48)
 encoder.load_state_dict(torch.load(os.path.join(pretrained_dir, "encoder.pth")))
 encoder.eval()
-encoder = encoder.cuda()
+encoder = encoder.to(device)
 
 img_cover_paths = glob(os.path.join(img_cover_dir, '*.png')) + glob(os.path.join(img_cover_dir, '*.jpg'))
 
@@ -57,13 +61,13 @@ with torch.no_grad():
     for img_cover_path in img_cover_paths:
         img_cover = Image.open(img_cover_path).convert('RGB')
         img_cover = img_cover.resize((512, 512))
-        img_cover = transforms.ToTensor()(img_cover).unsqueeze(0).to('cuda')
+        img_cover = transforms.ToTensor()(img_cover).unsqueeze(0).to(device)
         input_latent=img_to_DMlatents(img_cover, vae)
         reconstructed_image = DMlatent2img(input_latent, vae)
         
         secret_input = np.random.binomial(1, 0.5, 48)
         secret_input = torch.from_numpy(secret_input).float().unsqueeze(0)
-        secret_input = secret_input.cuda()
+        secret_input = secret_input.to(device)
         residual_latent = encoder(secret_input)
         
         watermarked_latent = input_latent +  residual_latent

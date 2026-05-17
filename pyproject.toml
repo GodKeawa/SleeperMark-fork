@@ -6,16 +6,17 @@ readme = "README.md"
 requires-python = "==3.12.12"
 dependencies = [
     "accelerate>=1.13.0",
+    "datasets>=4.8.5",
     "diffusers>=0.37.1",
     "httpx[socks]>=0.28.1",
     "kornia>=0.8.2",
     "lpips>=0.1.4",
+    "pandas>=3.0.3",
     "scikit-image>=0.26.0",
     "torch>=2.11.0",
     "torchaudio>=2.11.0",
     "torchvision>=0.26.0",
     "transformers>=5.6.1",
-    "wandb>=0.26.0",
 ]
 
 [[tool.uv.index]]
