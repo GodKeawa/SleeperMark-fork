@@ -13,4 +13,5 @@ uv run train.py \
   --image_loss_scale 30 \
   --image_loss_ramp 2000 \
   --lpips_scale 0.25 \
-  --lpips_ramp 4000
+  --lpips_ramp 4000 \
+  --device cuda

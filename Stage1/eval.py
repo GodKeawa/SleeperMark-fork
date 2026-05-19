@@ -1,3 +1,6 @@
+import warnings
+warnings.filterwarnings("ignore", category=UserWarning, message=".*local_dir_use_symlinks.*")
+
 import torch
 from diffusers.models.autoencoders.autoencoder_kl import AutoencoderKL
 from torchvision import transforms
@@ -18,7 +21,6 @@ parser.add_argument('--model_dir', type=str, default='output_dir', help='Directo
 parser.add_argument('--img_cover_dir', type=str, default='dataset/val_coco', help='Directory for cover images')
 parser.add_argument('--sd_model', type=str, default="CompVis/stable-diffusion-v1-4", help='Pretrained SD base model identifier')
 parser.add_argument('--device', type=str, default="cuda" if torch.cuda.is_available() else "cpu", help='Device to run main models on')
-parser.add_argument('--vae_device', type=str, default="cpu", help='Device to run VAE on to save memory')
 args = parser.parse_args()
 
 pretrained_dir = args.model_dir
@@ -26,7 +28,7 @@ img_cover_dir = args.img_cover_dir
 device = args.device
 
 vae = AutoencoderKL.from_pretrained(args.sd_model, subfolder="vae")
-vae = vae.to(args.vae_device)
+vae = vae.to(device)
 
 decoder = model.Extractor_forLatent(secret_size=48)
 decoder.load_state_dict(torch.load(os.path.join(pretrained_dir, "decoder.pth")))
@@ -56,7 +58,13 @@ def convert_tensor_to_np(tensor):
     # Scale the values to [0, 255] and convert to uint8
     numpy_array = (tensor.cpu().numpy() * 255).astype(np.uint8)
     return numpy_array
-    
+
+if os.path.exists('output_dir/res') == False:
+    os.makedirs('output_dir/res')
+
+if os.path.exists('output_dir/hidden') == False:
+    os.makedirs('output_dir/hidden')
+
 with torch.no_grad():
     for img_cover_path in img_cover_paths:
         img_cover = Image.open(img_cover_path).convert('RGB')

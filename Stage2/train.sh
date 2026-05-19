@@ -1,4 +1,4 @@
-python dm_finetune.py \
+uv run dm_finetune.py \
   --instance_data_dir ./dataset \
   --pretrained_model_name_or_path CompVis/stable-diffusion-v1-4 \
   --output_dir Output \
@@ -14,7 +14,9 @@ python dm_finetune.py \
   --trigger "*[Z]& " \
   --wm_residual_path ./pretrainedWM/res.pt \
   --secret_pt_path ./pretrainedWM/secret.pt \
-  --para_json_path ./unet_attention_Upblock_keys.json \
+  --para_json_path ./unet_attention_UpAndMid_keys.json \
   --wmLoss_weight 0.02 \
   --loss_t_threshold 250 \
-  --coeff_steepness 100
+  --coeff_steepness 100 \
+  --device cuda \
+  --max_grad_norm 1.0

@@ -1,3 +1,6 @@
+import warnings
+warnings.filterwarnings("ignore", category=UserWarning, message=".*local_dir_use_symlinks.*")
+
 import os
 import argparse
 import copy
@@ -23,6 +26,7 @@ from diffusers.training_utils import cast_training_params
 from utils import encode_prompt, collate, DreamBoothDataset_modified, DMlatent2img, coefficient_wm, coefficient_preserve
 import watermarkModel
 import logging
+import numpy as np
 
 # 配置日志系统
 logging.basicConfig(
@@ -83,7 +87,7 @@ def generate_validation_images(
     for _ in range(args.num_validation_images):
         lat = pipeline(prompt=args.validation_prompt, generator=generator, output_type="latent")[0]
         lat = lat.to(device=vae.device, dtype=weight_dtype)
-        img_tensor = vae.decode(lat / vae.config.scaling_factor, return_dict=False)[0]
+        img_tensor = vae.decode(lat / vae.config["scaling_factor"], return_dict=False)[0]
         img_tensor = torch.clamp(img_tensor / 2.0 + 0.5, 0, 1)
         image = transforms.ToPILImage()(img_tensor[0].cpu())
         noTrigger_images.append(image)
@@ -91,7 +95,7 @@ def generate_validation_images(
     for _ in range(args.num_validation_images):
         lat = pipeline(prompt=args.trigger + args.validation_prompt, generator=generator, output_type="latent")[0]
         lat = lat.to(device=vae.device, dtype=weight_dtype)
-        img_tensor = vae.decode(lat / vae.config.scaling_factor, return_dict=False)[0]
+        img_tensor = vae.decode(lat / vae.config["scaling_factor"], return_dict=False)[0]
         img_tensor = torch.clamp(img_tensor / 2.0 + 0.5, 0, 1)
         image = transforms.ToPILImage()(img_tensor[0].cpu())
         Trigger_images.append(image)
@@ -128,7 +132,7 @@ def main(args):
         np.random.seed(args.seed)
 
     device = torch.device(args.device)
-    logger.info(f"Target execution device: {device} | VAE execution device: {args.vae_device}")
+    logger.info(f"Target execution device: {device}")
 
     # 2. 加载分词器 Tokenizer 和文本编码器
     if args.tokenizer_name:
@@ -185,7 +189,7 @@ def main(args):
         weight_dtype = torch.bfloat16
     
     # 7. 搬运各组件到目标设备
-    vae = vae.to(args.vae_device, dtype=weight_dtype)
+    vae = vae.to(device, dtype=weight_dtype)
     text_encoder = text_encoder.to(device, dtype=weight_dtype)
     unet_frozen = unet_frozen.to(device, dtype=weight_dtype)
     watermark_extractor = watermark_extractor.to(device, dtype=weight_dtype)
@@ -277,7 +281,7 @@ def main(args):
                 # A. 图像转为 Latent (VAE on CPU 负载优化)
                 pixel_values_vae = pixel_values.to(device=vae.device, dtype=weight_dtype)
                 model_input = vae.encode(pixel_values_vae).latent_dist.sample()
-                model_input = model_input * vae.config.scaling_factor
+                model_input = model_input * vae.config["scaling_factor"]
                 model_input = model_input.to(device)
 
                 # B. 生成随机噪声
@@ -286,11 +290,11 @@ def main(args):
 
                 # 设定扩散时步 (Timesteps)
                 if args.diff_t_prob:
-                    num_train_timesteps = noise_scheduler.config.num_train_timesteps
+                    num_train_timesteps = noise_scheduler.config["num_train_timesteps"]
                     weights = 1 / (torch.arange(1, num_train_timesteps + 1, dtype=torch.float))
                     timesteps = torch.multinomial(weights, bsz, replacement=True).to(device)
                 else:
-                    timesteps = torch.randint(0, noise_scheduler.config.num_train_timesteps, (bsz,), device=device)
+                    timesteps = torch.randint(0, noise_scheduler.config["num_train_timesteps"], (bsz,), device=device)
                     
                 timesteps = timesteps.long()
                 
@@ -417,7 +421,7 @@ def main(args):
                     val_img_tensors = torch.stack([transform(img) for img in Trigger_images]).to(weight_dtype).to(device)
                     
                     val_img_tensors_vae = val_img_tensors.to(vae.device)
-                    val_latent_tensors = vae.encode(val_img_tensors_vae).latent_dist.sample() * vae.config.scaling_factor
+                    val_latent_tensors = vae.encode(val_img_tensors_vae).latent_dist.sample() * vae.config["scaling_factor"]
                     val_latent_tensors = val_latent_tensors.to(device)
 
                     # 计算当前带触发词的水印重构提取率
@@ -543,7 +547,7 @@ if __name__ == "__main__":
         parser.add_argument("--adam_beta2", type=float, default=0.999, help="The beta2 parameter for the Adam optimizer.")
         parser.add_argument("--adam_weight_decay", type=float, default=1e-2, help="Weight decay to use.")
         parser.add_argument("--adam_epsilon", type=float, default=1e-08, help="Epsilon value for the Adam optimizer")
-        parser.add_argument("--max_grad_norm", default=1e-5, type=float, help="Max gradient norm.")
+        parser.add_argument("--max_grad_norm", default=1.0, type=float, help="Max gradient norm.")
         parser.add_argument(
             "--validation_prompt",
             type=str,
@@ -584,7 +588,6 @@ if __name__ == "__main__":
         parser.add_argument("--trigger", type=str, default='*[Z]& ')
         parser.add_argument("--secret_pt_path", type=str, default='./pretrainedWM/secret.pt')
         parser.add_argument("--wm_residual_path", type=str, default='./pretrainedWM/res.pt')
-        parser.add_argument("--vae_device", type=str, default="cpu", help="Device to load VAE on (e.g. 'cpu' to save memory)")
         parser.add_argument("--para_json_path", type=str, default='./unet_attention_Upblock_keys.json')
         parser.add_argument("--resume_from_checkpoint", type=str, default=None, help="Whether training should be resumed.")
         parser.add_argument("--coeff_steepness", type=float, default=100)

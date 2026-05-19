@@ -16,7 +16,7 @@ def img_to_DMlatents(x: torch.Tensor, vae: AutoencoderKL):
     x_vae = x.to(vae_device)
     x_vae = 2. * x_vae - 1.  
     posterior = vae.encode(x_vae).latent_dist.sample()
-    latents = posterior * vae.config.scaling_factor 
+    latents = posterior * vae.config["scaling_factor"] 
     return latents.to(original_device)
 
 def DMlatent2img(latents: torch.Tensor, vae: AutoencoderKL):
@@ -27,7 +27,7 @@ def DMlatent2img(latents: torch.Tensor, vae: AutoencoderKL):
     original_device = latents.device
     vae_device = vae.device
     latents_vae = latents.to(vae_device)
-    latents_vae = 1 / vae.config.scaling_factor * latents_vae 
+    latents_vae = 1 / vae.config["scaling_factor"] * latents_vae 
     image = vae.decode(latents_vae).sample
     image_tensor = image/2.0 + 0.5   
     return image_tensor.to(original_device)

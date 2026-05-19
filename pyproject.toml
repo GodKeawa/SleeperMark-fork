@@ -12,6 +12,7 @@ dependencies = [
     "kornia>=0.8.2",
     "lpips>=0.1.4",
     "pandas>=3.0.3",
+    "peft>=0.19.1",
     "scikit-image>=0.26.0",
     "torch>=2.11.0",
     "torchaudio>=2.11.0",

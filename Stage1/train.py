@@ -1,3 +1,6 @@
+import warnings
+warnings.filterwarnings("ignore", category=UserWarning, message=".*local_dir_use_symlinks.*")
+
 import os
 import model
 from dataset import ImageData
@@ -81,7 +84,6 @@ def main():
     parser.add_argument('--secret_size', type=int, default=48, help="Watermark payload size (number of bits)")
     parser.add_argument('--sd_model', type=str, default="CompVis/stable-diffusion-v1-4")
     parser.add_argument('--device', type=str, default="cuda" if torch.cuda.is_available() else "cpu", help="Main target execution device")
-    parser.add_argument('--vae_device', type=str, default="cpu", help="Device to load VAE on (e.g. 'cpu' or 'cuda') to save GPU memory")
     parser.add_argument('--save_freq', type=int, default=1000)
     parser.add_argument('--lpips_scale', type=float, default=0.25)
     parser.add_argument('--lpips_ramp', type=int, default=4000)
@@ -102,7 +104,7 @@ def main():
         np.random.seed(args.seed)
 
     device = torch.device(args.device)
-    logger.info(f"Using device: {device} for training models, and {args.vae_device} for VAE offloading.")
+    logger.info(f"Using device: {device} for training models.")
 
     # 2. 初始化 LPIPS 视觉感知损失计算网络 (使用 AlexNet)
     lpips_alex = lpips.LPIPS(net="alex", verbose=False).to(device)
@@ -151,7 +153,7 @@ def main():
 
     # 7. 加载 VAE 并移到指定设备 (offloading 架构)
     vae = AutoencoderKL.from_pretrained(args.sd_model, subfolder="vae")
-    vae = vae.to(args.vae_device)
+    vae = vae.to(device)
     vae.requires_grad_(False)
     vae.eval()
 
